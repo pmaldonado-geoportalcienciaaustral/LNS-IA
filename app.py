@@ -6,15 +6,24 @@ import plotly.express as px
 st.set_page_config(page_title="Nodo LNS - Gestión de Datos", layout="wide")
 
 # --- CONEXIÓN CON GOOGLE SHEETS ---
-# No es necesario pasar la URL manualmente si ya está en secrets.toml
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Función para cargar datos optimizada
-@st.cache_data(ttl=600) # Caché de 10 minutos para no saturar la conexión
+@st.cache_data(ttl=600)
 def cargar_datos(nombre_pestana):
     try:
-        # La librería busca automáticamente la URL en st.secrets["connections"]["gsheets"]["spreadsheet"]
-        return conn.read(worksheet=nombre_pestana)
+        df = conn.read(worksheet=nombre_pestana)
+        
+        # --- RENOMBRAR CAMPOS ESPECÍFICOS ---
+        # Mapeamos 'Nombre Original': 'Nombre Nuevo'
+        columnas_a_renombrar = {
+            'autor': 'Autor(a)',
+            'ambiente': 'Ambiente',
+            'publicaciones_tot': 'N° Publicaciones'
+        }
+        
+        # Solo renombramos si las columnas existen en la pestaña actual
+        df = df.rename(columns=columnas_a_renombrar)
+        return df
     except Exception as e:
         st.error(f"Error al cargar la pestaña '{nombre_pestana}': {e}")
         return pd.DataFrame()
@@ -28,41 +37,49 @@ menu = st.sidebar.selectbox("Seleccionar Módulo",
 if menu == "Dashboard de Publicaciones":
     st.header("Análisis Científico")
     
-    # IMPORTANTE: Verifica que la pestaña se llame exactamente "autoresLNS" en tu Google Sheet
     df = cargar_datos("autoresLNS") 
     
     if not df.empty:
-        col1, col2 = st.columns(2)
+        # Definimos los nuevos nombres para la lógica del dashboard
+        col_autor = "Autor(a)"
+        col_ambiente = "Ambiente"
+        col_total = "N° Publicaciones"
+
+        col1, col2 = st.columns([2, 1]) # Ajustamos ancho de columnas
+        
         with col1:
-            # Verificamos que las columnas existan antes de graficar
-            columnas_necesarias = ["Institucion", "Total", "Subcategoria"]
-            if all(col in df.columns for col in columnas_necesarias):
-                fig = px.bar(df, x="Institucion", y="Total", color="Subcategoria", title="Publicaciones por Institución")
+            # Verificamos que las columnas ya renombradas existan
+            if col_autor in df.columns and col_total in df.columns:
+                # Gráfico: Publicaciones por Autor(a) coloreado por Ambiente
+                fig = px.bar(df, 
+                             x=col_autor, 
+                             y=col_total, 
+                             color=col_ambiente if col_ambiente in df.columns else None,
+                             title="Total de Publicaciones por Autor(a)",
+                             labels={col_total: "Cantidad de Publicaciones"})
+                
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.warning(f"La hoja debe tener las columnas: {columnas_necesarias}")
+                st.warning(f"No se encontraron las columnas esperadas. Verifica que en el Excel se llamen: autor, ambiente, publicaciones_tot")
         
         with col2:
-            if "Total" in df.columns:
-                total_pub = df['Total'].sum()
-                st.metric("Total de Publicaciones registradas", int(total_pub))
+            if col_total in df.columns:
+                total_pub = df[col_total].sum()
+                st.metric("Total de Publicaciones", int(total_pub))
                 
-                if "Subcategoria" in df.columns:
-                    top_area = df.groupby('Subcategoria')['Total'].sum().idxmax()
-                    st.write(f"El área con mayor actividad es: **{top_area}**")
+                if col_ambiente in df.columns:
+                    # Área con más publicaciones
+                    top_area = df.groupby(col_ambiente)[col_total].sum().idxmax()
+                    st.info(f"El ambiente con mayor impacto es: **{top_area}**")
             
-        st.subheader("Datos Crudos")
-        st.dataframe(df)
+        st.subheader("Vista Detallada de Datos")
+        st.dataframe(df, use_container_width=True)
 
 elif menu == "Mapa de Capacidades":
     st.header("📍 Georreferenciación de Capacidades CTCI")
-    
-    # IMPORTANTE: Verifica que la pestaña se llame exactamente "capacidades"
     df_cap = cargar_datos("capacidades")
     
     if not df_cap.empty:
-        # Streamlit necesita columnas llamadas 'lat' y 'lon' (o 'latitude'/'longitude')
-        # Si tus columnas se llaman distinto (ej: 'LATITUD'), renómbralas:
         if "LATITUD" in df_cap.columns and "LONGITUD" in df_cap.columns:
             df_cap = df_cap.rename(columns={"LATITUD": "lat", "LONGITUD": "lon"})
         
