@@ -1,5 +1,3 @@
 pandas
 plotly
 streamlit-gsheets-connection
-pypdf
-google-generativeai
